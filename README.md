@@ -2,6 +2,8 @@
 
 Local Windows manager for running one `llama-server.exe` instance from a llama.cpp SYCL build on Intel Arc GPUs.
 
+![llama B70 Manager screenshot](docs/assets/llama-b70-manager.png)
+
 The app provides:
 
 - Hugging Face GGUF cache scanning
