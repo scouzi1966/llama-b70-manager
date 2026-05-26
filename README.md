@@ -2,7 +2,7 @@
 
 Local Windows manager for running one `llama-server.exe` instance from a llama.cpp SYCL build on Intel Arc GPUs.
 
-![llama B70 Manager screenshot showing model management, launch controls, and server logs](docs/assets/llama-b70-manager-full.png)
+![llama B70 Manager screenshot showing model management, launch controls, and server logs](docs/assets/llama-b70-manager-retina.png)
 
 The app provides:
 
