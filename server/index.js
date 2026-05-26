@@ -6,7 +6,7 @@ import { config } from './config.js';
 import { getDownloadLogs, getDownloadStatus, startDownload, stopDownload } from './downloader.js';
 import { inspectRepo } from './hfRepo.js';
 import { deleteModel, scanModels } from './models.js';
-import { getLogs, getStatus, startServer, stopServer } from './processManager.js';
+import { getLogs, getStatus, startServer, stopServer, syncStatus } from './processManager.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, '..');
@@ -53,7 +53,7 @@ const server = http.createServer(async (req, res) => {
       if (status.running && status.options?.model === body.path) throw new Error('Stop the running server before deleting its loaded model.');
       return send(res, 200, await deleteModel(config.hfCache, body.path));
     }
-    if (url.pathname === '/api/status') return send(res, 200, getStatus());
+    if (url.pathname === '/api/status') return send(res, 200, await syncStatus({ port: url.searchParams.get('port'), host: url.searchParams.get('host') }));
     if (url.pathname === '/api/logs') return send(res, 200, { logs: getLogs() });
     if (url.pathname === '/api/download/status') return send(res, 200, getDownloadStatus());
     if (url.pathname === '/api/download/logs') return send(res, 200, { logs: getDownloadLogs() });

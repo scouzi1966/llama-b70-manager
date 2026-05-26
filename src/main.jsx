@@ -494,7 +494,7 @@ function App() {
 
           <div className="runtime-strip">
             <div><Cpu size={16} /> {options.backend === 'opencl' ? 'ONEAPI_DEVICE_SELECTOR=opencl:gpu' : options.backend === 'levelzero' ? 'ONEAPI_DEVICE_SELECTOR=level_zero:*' : 'CPU / -ngl 0'}</div>
-            <div><MonitorPlay size={16} /> {url}</div>
+            <div><MonitorPlay size={16} /> {status.external ? 'resynced external server' : url}</div>
             <div><Zap size={16} /> blank fields omitted</div>
           </div>
         </section>

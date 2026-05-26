@@ -33,6 +33,13 @@ const flagSpecs = [
 let managed = null;
 const logs = [];
 const maxLogs = 800;
+const defaultStatusOptions = {
+  backend: 'opencl',
+  host: '',
+  port: '',
+  openGui: true,
+  enableSysman: true,
+};
 
 function pushLog(source, text) {
   const lines = String(text).split(/\r?\n/).filter(Boolean);
@@ -95,9 +102,91 @@ export function getStatus() {
     args: managed.args,
     options: managed.options,
     exitCode: managed.exitCode,
+    external: Boolean(managed.external),
     port,
     url: `http://${host}:${port}`,
   };
+}
+
+async function fetchLlamaMetadata(host, port) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 800);
+  try {
+    const response = await fetch(`http://${host}:${port}/v1/models`, { signal: controller.signal });
+    if (!response.ok) return null;
+    const data = await response.json();
+    if (data?.object !== 'list' || !Array.isArray(data.data)) return null;
+    const model = data.data[0]?.id || data.models?.[0]?.model || data.models?.[0]?.name || '';
+    return { model, models: data.data.length || data.models?.length || 0 };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function findLlamaProcess(port) {
+  const script = `
+$connections = Get-NetTCPConnection -LocalPort ${Number(port)} -State Listen -ErrorAction SilentlyContinue
+$ids = $connections | Select-Object -ExpandProperty OwningProcess -Unique
+foreach ($id in $ids) {
+  $p = Get-CimInstance Win32_Process -Filter "ProcessId=$id" -ErrorAction SilentlyContinue
+  if ($p -and $p.CommandLine -match "llama-server") {
+    [pscustomobject]@{ ProcessId = $p.ProcessId; CommandLine = $p.CommandLine } | ConvertTo-Json -Compress
+  }
+}
+`;
+  return new Promise((resolve) => {
+    const child = spawn('powershell.exe', ['-NoProfile', '-Command', script], { windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
+    let raw = '';
+    child.stdout.on('data', (data) => { raw += data.toString(); });
+    child.on('exit', () => {
+      const line = raw.split(/\r?\n/).find(Boolean);
+      if (!line) return resolve(null);
+      try {
+        const parsed = JSON.parse(line);
+        resolve({ pid: parsed.ProcessId, command: parsed.CommandLine });
+      } catch {
+        resolve(null);
+      }
+    });
+    child.on('error', () => resolve(null));
+  });
+}
+
+export async function syncStatus(options = {}) {
+  const status = getStatus();
+  if (status.running || status.state === 'crashed') return status;
+
+  const host = hasValue(options.host) ? String(options.host).trim() : '127.0.0.1';
+  const port = hasValue(options.port) ? Number(options.port) : 8080;
+  const metadata = await fetchLlamaMetadata(host, port);
+  if (!metadata) {
+    if (managed?.external) managed = null;
+    return getStatus();
+  }
+
+  const proc = await findLlamaProcess(port);
+  managed = {
+    child: null,
+    pid: proc?.pid || null,
+    state: 'running',
+    external: true,
+    startedAt: Date.now(),
+    command: proc?.command || `External llama.cpp server detected at http://${host}:${port}`,
+    args: [],
+    options: {
+      ...defaultStatusOptions,
+      ...options,
+      host: hasValue(options.host) ? String(options.host).trim() : '',
+      port: hasValue(options.port) ? Number(options.port) : '',
+      model: metadata.model,
+    },
+    exitCode: null,
+  };
+
+  pushLog('manager', `Resynced external llama.cpp server at http://${host}:${port}${metadata.model ? ` model=${metadata.model}` : ''}`);
+  return getStatus();
 }
 
 export async function isPortOpen(port, host = '127.0.0.1') {
@@ -123,6 +212,11 @@ async function waitForPort(port, host) {
 }
 
 export async function startServer(options) {
+  const synced = await syncStatus(options);
+  if (synced.running) {
+    throw new Error('A llama-server instance is already running. Stop it first.');
+  }
+
   if (managed && (managed.state === 'starting' || managed.state === 'running')) {
     throw new Error('A managed llama-server instance is already running. Stop it first.');
   }
@@ -205,7 +299,23 @@ export async function startServer(options) {
 }
 
 export async function stopServer() {
-  if (!managed || !managed.child || managed.state === 'stopped') return getStatus();
+  if (!managed || managed.state === 'stopped') return getStatus();
+  if (managed.external) {
+    const proc = managed.pid ? { pid: managed.pid } : await findLlamaProcess(hasValue(managed.options.port) ? Number(managed.options.port) : 8080);
+    if (!proc?.pid) {
+      throw new Error('External llama-server is running, but its process id could not be found.');
+    }
+    pushLog('manager', `Stopping external llama-server process tree pid=${proc.pid}`);
+    await new Promise((resolve) => {
+      const killer = spawn('taskkill.exe', ['/PID', String(proc.pid), '/T', '/F'], { windowsHide: true });
+      killer.on('exit', resolve);
+      killer.on('error', resolve);
+    });
+    managed.state = 'stopped';
+    managed.exitCode = 0;
+    return getStatus();
+  }
+  if (!managed.child) return getStatus();
   const pid = managed.child.pid;
   pushLog('manager', `Stopping process tree pid=${pid}`);
   await new Promise((resolve) => {
