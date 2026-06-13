@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import net from 'node:net';
+import os from 'node:os';
 import { config } from './config.js';
 
 const backendEnv = {
@@ -35,7 +36,7 @@ const logs = [];
 const maxLogs = 800;
 const defaultStatusOptions = {
   backend: 'opencl',
-  host: '',
+  host: '0.0.0.0',
   port: '',
   openGui: true,
   enableSysman: true,
@@ -55,6 +56,31 @@ function quoteCmd(value) {
 
 function hasValue(value) {
   return value !== undefined && value !== null && String(value).trim() !== '';
+}
+
+function normalizeBindHost(value) {
+  return hasValue(value) ? String(value).trim() : defaultStatusOptions.host;
+}
+
+function connectHostFor(host) {
+  const value = String(host || '').trim();
+  if (!value || value === '0.0.0.0' || value === '::' || value === '*') return '127.0.0.1';
+  return value;
+}
+
+function getLanAddress() {
+  for (const entries of Object.values(os.networkInterfaces())) {
+    for (const entry of entries || []) {
+      if (entry.family === 'IPv4' && !entry.internal) return entry.address;
+    }
+  }
+  return null;
+}
+
+function extractHostFromCommand(command) {
+  if (!command) return null;
+  const match = String(command).match(/(?:^|\s)(?:--host|-h)\s+"?([^"\s]+)"?/i);
+  return match?.[1] || null;
 }
 
 function addValuedArg(args, flag, value) {
@@ -91,8 +117,12 @@ export function getLogs() {
 
 export function getStatus() {
   if (!managed) return { state: 'stopped', running: false };
-  const host = hasValue(managed.options.host) ? managed.options.host : '127.0.0.1';
+  const host = normalizeBindHost(managed.options.host);
+  const connectHost = connectHostFor(host);
   const port = hasValue(managed.options.port) ? Number(managed.options.port) : 8080;
+  const lanAddress = host === connectHost ? null : getLanAddress();
+  const localUrl = `http://${connectHost}:${port}`;
+  const lanUrl = lanAddress ? `http://${lanAddress}:${port}` : `http://<this-pc-ip>:${port}`;
   return {
     state: managed.state,
     running: managed.state === 'starting' || managed.state === 'running',
@@ -104,7 +134,11 @@ export function getStatus() {
     exitCode: managed.exitCode,
     external: Boolean(managed.external),
     port,
-    url: `http://${host}:${port}`,
+    bindHost: host,
+    url: localUrl,
+    apiUrl: `${localUrl}/v1`,
+    lanUrl: host === connectHost ? localUrl : lanUrl,
+    lanApiUrl: host === connectHost ? `${localUrl}/v1` : `${lanUrl}/v1`,
   };
 }
 
@@ -158,15 +192,18 @@ export async function syncStatus(options = {}) {
   const status = getStatus();
   if (status.running || status.state === 'crashed') return status;
 
-  const host = hasValue(options.host) ? String(options.host).trim() : '127.0.0.1';
+  const requestedHost = hasValue(options.host) ? normalizeBindHost(options.host) : '127.0.0.1';
+  const connectHost = connectHostFor(requestedHost);
   const port = hasValue(options.port) ? Number(options.port) : 8080;
-  const metadata = await fetchLlamaMetadata(host, port);
+  const metadata = await fetchLlamaMetadata(connectHost, port);
   if (!metadata) {
     if (managed?.external) managed = null;
     return getStatus();
   }
 
   const proc = await findLlamaProcess(port);
+  const commandHost = extractHostFromCommand(proc?.command);
+  const host = hasValue(options.host) ? requestedHost : (commandHost || '127.0.0.1');
   managed = {
     child: null,
     pid: proc?.pid || null,
@@ -178,14 +215,14 @@ export async function syncStatus(options = {}) {
     options: {
       ...defaultStatusOptions,
       ...options,
-      host: hasValue(options.host) ? String(options.host).trim() : '',
+      host,
       port: hasValue(options.port) ? Number(options.port) : '',
       model: metadata.model,
     },
     exitCode: null,
   };
 
-  pushLog('manager', `Resynced external llama.cpp server at http://${host}:${port}${metadata.model ? ` model=${metadata.model}` : ''}`);
+  pushLog('manager', `Resynced external llama.cpp server at http://${connectHost}:${port}${metadata.model ? ` model=${metadata.model}` : ''}`);
   return getStatus();
 }
 
@@ -224,12 +261,12 @@ export async function startServer(options) {
   const normalized = {
     ...options,
     backend: options.backend || 'opencl',
-    host: hasValue(options.host) ? String(options.host).trim() : '',
+    host: normalizeBindHost(options.host),
     port: hasValue(options.port) ? Number(options.port) : '',
     openGui: Boolean(options.openGui),
   };
 
-  const probeHost = normalized.host || '127.0.0.1';
+  const probeHost = connectHostFor(normalized.host);
   const probePort = normalized.port || 8080;
 
   if (!normalized.model || !fs.existsSync(normalized.model)) throw new Error('Selected model file does not exist.');

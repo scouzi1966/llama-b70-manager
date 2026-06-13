@@ -17,7 +17,7 @@ const blankOptions = {
   backend: 'opencl',
   openGui: true,
   enableSysman: true,
-  host: '',
+  host: '0.0.0.0',
   port: '',
   ctx: '',
   predict: '',
@@ -93,7 +93,7 @@ const optionGroups = [
   {
     title: 'Core',
     fields: [
-      ['host', 'Host', '127.0.0.1'], ['port', 'Port', '8080'], ['ctx', 'Context (-c)', 'server default'], ['predict', 'Predict (-n)', 'server default'], ['gpuLayers', 'GPU layers (-ngl)', 'auto/default'], ['threads', 'Threads (-t)', 'auto'], ['threadsBatch', 'Batch threads (-tb)', 'auto'], ['batch', 'Batch (-b)', 'default'], ['ubatch', 'Microbatch (-ub)', 'default'], ['keep', 'Keep', 'default'],
+      ['host', 'Host', '0.0.0.0'], ['port', 'Port', '8080'], ['ctx', 'Context (-c)', 'server default'], ['predict', 'Predict (-n)', 'server default'], ['gpuLayers', 'GPU layers (-ngl)', 'auto/default'], ['threads', 'Threads (-t)', 'auto'], ['threadsBatch', 'Batch threads (-tb)', 'auto'], ['batch', 'Batch (-b)', 'default'], ['ubatch', 'Microbatch (-ub)', 'default'], ['keep', 'Keep', 'default'],
     ],
   },
   {
@@ -257,6 +257,7 @@ function App() {
   }, [optionFilter]);
 
   const selectedModel = models.find((m) => m.path === selected);
+  const localHost = !options.host || ['0.0.0.0', '::', '*'].includes(String(options.host).trim()) ? '127.0.0.1' : options.host;
 
   async function start() {
     setError('');
@@ -344,7 +345,9 @@ function App() {
   }
 
   const running = status.running || status.state === 'starting';
-  const url = status.url || `http://${options.host || '127.0.0.1'}:${options.port || '8080'}`;
+  const url = status.url || `http://${localHost}:${options.port || '8080'}`;
+  const inferenceUrl = status.apiUrl || `${url}/v1`;
+  const lanInferenceUrl = status.lanApiUrl || (String(options.host).trim() === '0.0.0.0' ? `http://<this-pc-ip>:${options.port || '8080'}/v1` : inferenceUrl);
 
   return (
     <main className="shell">
@@ -495,6 +498,7 @@ function App() {
           <div className="runtime-strip">
             <div><Cpu size={16} /> {options.backend === 'opencl' ? 'ONEAPI_DEVICE_SELECTOR=opencl:gpu' : options.backend === 'levelzero' ? 'ONEAPI_DEVICE_SELECTOR=level_zero:*' : 'CPU / -ngl 0'}</div>
             <div><MonitorPlay size={16} /> {status.external ? 'resynced external server' : url}</div>
+            <div><Globe size={16} /> Inference API {lanInferenceUrl}</div>
             <div><Zap size={16} /> blank fields omitted</div>
           </div>
         </section>
