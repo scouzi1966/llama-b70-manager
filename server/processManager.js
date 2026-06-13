@@ -79,7 +79,7 @@ function getLanAddress() {
 
 function extractHostFromCommand(command) {
   if (!command) return null;
-  const match = String(command).match(/(?:^|\s)(?:--host|-h)\s+"?([^"\s]+)"?/i);
+  const match = String(command).match(/(?:^|\s)"?(?:--host|-h)"?\s+"?([^"\s]+)"?/i);
   return match?.[1] || null;
 }
 

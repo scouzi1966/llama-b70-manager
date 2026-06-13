@@ -17,6 +17,7 @@ const blankOptions = {
   backend: 'opencl',
   openGui: true,
   enableSysman: true,
+  disableReasoning: false,
   host: '0.0.0.0',
   port: '',
   ctx: '',
@@ -262,9 +263,13 @@ function App() {
   async function start() {
     setError('');
     try {
+      const launchOptions = {
+        ...options,
+        reasoning: options.disableReasoning ? 'off' : options.reasoning,
+      };
       await api('start', {
         method: 'POST',
-        body: JSON.stringify({ ...options, model: selected }),
+        body: JSON.stringify({ ...launchOptions, model: selected }),
       });
       await refreshStatus();
     } catch (e) {
@@ -459,6 +464,7 @@ function App() {
             </label>
             <label className="checkbox-label"><input type="checkbox" checked={options.openGui} onChange={(e) => setOptions({ ...options, openGui: e.target.checked })} disabled={running} /> Open GUI after start</label>
             <label className="checkbox-label"><input type="checkbox" checked={options.enableSysman} onChange={(e) => setOptions({ ...options, enableSysman: e.target.checked })} disabled={running} /> ZES sysman</label>
+            <label className="checkbox-label"><input type="checkbox" checked={options.disableReasoning} onChange={(e) => setOptions({ ...options, disableReasoning: e.target.checked, reasoning: e.target.checked ? 'off' : options.reasoning === 'off' ? '' : options.reasoning })} disabled={running} /> Disable reasoning</label>
             <button onClick={() => setOptions(blankOptions)} disabled={running}><RotateCcw size={16} /> Reset blanks</button>
           </div>
 

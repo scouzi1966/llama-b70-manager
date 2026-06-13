@@ -13,6 +13,7 @@ The app provides:
 - OpenCL GPU, Level Zero, and CPU fallback launch modes
 - llama-server option controls with blank values omitted
 - LAN API access by default with `--host 0.0.0.0`
+- one-click reasoning disable switch using `--reasoning off`
 - local GGUF deletion guarded to the Hugging Face cache
 
 ## Requirements
